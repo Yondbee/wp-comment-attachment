@@ -20,6 +20,8 @@ if (!class_exists('wpCommentAttachment')){
         private $key            = 'commentAttachment';
         private $settings;
 
+        const PLUGIN_VERSION = '1.5.9.0';
+
         /**
          * Constructor
          */
@@ -49,7 +51,7 @@ if (!class_exists('wpCommentAttachment')){
                     wpCommentAttachment::deleteAttachment($_GET['c']);
                     delete_comment_meta($_GET['c'], 'attachmentId');
                     add_action('admin_notices', function(){
-                        echo "<div class='updated'><p>".__('Comment Attachment deleted.','comment-attachment')."</p></div>";
+                        echo "<div class='updated'><p>".__('Comment Attachment(s) deleted.','comment-attachment')."</p></div>";
                     });
                 }
             }
@@ -63,9 +65,13 @@ if (!class_exists('wpCommentAttachment')){
         {
             // Language support
             load_plugin_textdomain('comment-attachment', false, dirname(plugin_basename(__FILE__)).'/languages/');
+
+            
+
             // Check Requriemnts
             if(!$this->checkRequirements()){ return; }
             // Magic actions
+            
             add_filter('preprocess_comment',        array($this, 'checkAttachment'), 10, 1);
             add_action('comment_form_top',          array($this, 'displayBeforeForm'));
             add_action('comment_form_before_fields',array($this, 'displayFormAttBefore'));
@@ -76,6 +82,22 @@ if (!class_exists('wpCommentAttachment')){
             add_action('delete_comment',            array($this, 'deleteAttachment'));
             add_filter('upload_mimes',              array($this, 'getAllowedUploadMimes'), 10, 1);
             add_filter('comment_notification_text', array($this, 'notificationText'), 10, 2);
+
+            // Y: Scripts for multiple file upload
+            $settings = $this->settings;
+            add_action('wp_enqueue_scripts', function () use ($settings) {
+                
+                wp_enqueue_script('comment-attachment', plugin_dir_url( __FILE__ ) . 'comment-attachment.js', ['jquery'], self::PLUGIN_VERSION, true);
+
+                // Y: Add custom settings
+                $settings['commentAttachmentAllowedTypes'] = $this->getAllowedMimeTypes();
+
+                wp_localize_script('comment-attachment', 'y_comment_attachment', $settings);
+
+                wp_enqueue_script('filestack', 'https://static.filestackapi.com/filestack-js/1.x.x/filestack.min.js');
+                wp_enqueue_script('polyfill-promise', 'https://polyfill.io/v3/polyfill.min.js?features=default%2CPromise');
+                
+            });
         }
 
         /**
@@ -123,6 +145,40 @@ if (!class_exists('wpCommentAttachment')){
                 'type'    => 'text',
                 'section' => $this->adminPrefix
             );
+
+            // Y: Added filestack settings
+            $setts[$this->adminPrefix . 'Filestack'] = array(
+                'title'   => __('Filestack key','comment-attachment'),
+                'desc'    => '',
+                'std'     => '',
+                'type'    => 'text',
+                'section' => $this->adminPrefix
+            );
+
+            $setts[$this->adminPrefix . 'FilestackMaxFiles'] = array(
+                'title'   => __('Filestack maximum uploadable files','comment-attachment'),
+                'desc'    => '',
+                'std'     => 5,
+                'type'    => 'number',
+                'section' => $this->adminPrefix
+            );
+
+            $setts[$this->adminPrefix . 'FilestackAmazonS3Bucket'] = array(
+                'title'   => __('The name of the Amazon S3 bucket where to store the files','comment-attachment'),
+                'desc'    => '',
+                'std'     => '',
+                'type'    => 'text',
+                'section' => $this->adminPrefix
+            );            
+
+            $setts[$this->adminPrefix . 'FilestackAmazonS3BucketFolder'] = array(
+                'title'   => __('The subfolder of the Amazon S3 bucket where to store the files','comment-attachment'),
+                'desc'    => '',
+                'std'     => '',
+                'type'    => 'text',
+                'section' => $this->adminPrefix
+            );                        
+
             $setts[$this->adminPrefix . 'MaxSize'] = array(
                 'title'   => __('Maxium file size <small>(in megabytes)</small>','comment-attachment'),
                 'desc'    => sprintf(__('Your server currently allows us to use maximum of <strong>%s MB(s).</strong>','comment-attachment'),$this->getMaximumUploadFileSize()),
@@ -236,6 +292,7 @@ if (!class_exists('wpCommentAttachment')){
             $setts[$this->adminPrefix . 'WEBM'] = array('section' => $this->adminPrefix . 'Types', 'title' => 'WEBM ', 'type' => 'checkbox', 'std' => 0);
             $setts[$this->adminPrefix . 'H06']  = array('section' => $this->adminPrefix . 'Types', 'title' => __('<strong>Others</strong>','comment-attachment'), 'type' => 'heading');
             $setts[$this->adminPrefix . 'APK']  = array('section' => $this->adminPrefix . 'Types', 'title' => 'APK ', 'type' => 'checkbox', 'std' => 0);
+            $setts[$this->adminPrefix . 'TXT']  = array('section' => $this->adminPrefix . 'Types', 'title' => 'TXT ', 'type' => 'checkbox', 'std' => 0);
             return $setts;
         }
 
@@ -446,6 +503,7 @@ if (!class_exists('wpCommentAttachment')){
                 $this->adminPrefix . 'FLV' => 'video/x-flv',
                 $this->adminPrefix . 'WEBM'=> 'video/webm',
                 $this->adminPrefix . 'APK' => 'application/vnd.android.package-archive',
+                $this->adminPrefix . 'TXT' => 'text/plain'
             );
         }
 
@@ -671,7 +729,7 @@ if (!class_exists('wpCommentAttachment')){
 
         public function displayBeforeForm()
         {
-            echo '</form><form action="'. get_home_url() .'/wp-comments-post.php" method="POST" enctype="multipart/form-data" id="attachmentForm" class="comment-form" novalidate>';
+            echo '</form><form action="'. get_home_url() .'/wp-comments-post.php" method="POST" class="comment-form" novalidate>';
         }
 
 
@@ -683,11 +741,39 @@ if (!class_exists('wpCommentAttachment')){
         public function displayFormAttAfter()   { if(ATT_POS == 'after'){ $this->displayFormAtt(); } }
         public function displayFormAtt()
         {
-            $required = ATT_REQ ? ' <span class="required">*</span>' : '';
             echo '<p class="comment-form-url comment-form-attachment">'.
-                '<label for="attachment">' . ATT_TITLE . $required .'<small class="attachmentRules">&nbsp;&nbsp;('.__('Allowed file types','comment-attachment').': <strong>'. $this->displayAllowedFileTypes() .'</strong>, '.__('maximum file size','comment-attachment').': <strong>'. ATT_MAX .'MB.</strong></small></label>'.
-                '</p>'.
-                '<p class="comment-form-url comment-form-attachment"><input id="attachment" name="attachment" type="file" /></p>';
+                '<small class="attachmentRules">&nbsp;&nbsp;('.__('Allowed file types','comment-attachment').': <strong>'. $this->displayAllowedFileTypes() .'</strong>, '.__('maximum file size','comment-attachment').': <strong>'. ATT_MAX .'MB.)</strong></small>'.
+                '<input name="attachment-data" type="hidden" value="" /><input name="action" value="y_attachment_upload" type="hidden" />'.
+                '</p>';
+        }
+
+        /**
+         * Retrieve a file from a remote location
+         * and move it to a temporary local file.
+         *
+         * @param array $file Associative array with the same structure as $_FILES items
+         * @return mixed False if failed, new local file path if succeded.
+         */
+        private function moveFileLocally($file)
+        {
+            if (empty($file['tmp_name']))
+                return false;
+
+            // must be a url, safety check!
+            if (strpos($file['tmp_name'], 'http') !== 0)
+                return false;
+
+            $get_content = file_get_contents($file['tmp_name']);
+            if (empty($get_content)) {
+                error_log('[WPCA] Unable to retrieve remote file, aborting...');
+                return false;
+            }
+
+            $tmpFilePath = tempnam(sys_get_temp_dir(), 'WPCA_UPLOAD_');
+            if (file_put_contents($tmpFilePath, $get_content) === false)
+                return false;
+            else
+                return $tmpFilePath;
         }
 
 
@@ -700,40 +786,76 @@ if (!class_exists('wpCommentAttachment')){
 
         public function checkAttachment($data)
         {
-            if($_FILES['attachment']['size'] > 0 && $_FILES['attachment']['error'] == 0){
+            /*
+                TODO:
 
-                $fileInfo = pathinfo($_FILES['attachment']['name']);
-                $fileExtension = strtolower($fileInfo['extension']);
+                Y> we have to refactor this to check for:
+                    - number of files
+                    - type of each one
+                    - file size
 
-                if(function_exists('finfo_file')){
-                    $fileType = finfo_file(finfo_open(FILEINFO_MIME_TYPE), $_FILES['attachment']['tmp_name']);
-                } elseif(function_exists('mime_content_type')) {
-                    $fileType = mime_content_type($_FILES['attachment']['tmp_name']);
-                } else {
-                    $fileType = $_FILES['attachment']['type'];
+                But using filestack's upload structure.
+            */
+            if (empty($_REQUEST['attachment-data']))
+                wp_die(__('<strong>ERROR:</strong> Unable to find attachment-data field!','comment-attachment'));
+
+            error_log('[WPCA] Stripped attach data ' . stripslashes($_REQUEST['attachment-data']));
+            $attached_files = json_decode(stripslashes($_REQUEST['attachment-data']), true);
+            if ($attached_files === null)
+                wp_die(__('<strong>ERROR:</strong> Unable to parse attachment-data field!','comment-attachment'));
+
+            // Y> override PHP files array with attached ones, copy them locally, then let the plugin make its course
+            $_FILES = $attached_files;
+            foreach ($_FILES as $k => $f)
+            {
+                $newName = $this->moveFileLocally($f);
+                if ($newName === false)
+                {
+                    error_log('[WPCA] Unable to move file locally',  print_r($f, true));
+                    continue;
                 }
 
-                // Is: allowed mime type / file extension, and size? extension making lowercase, just to make sure
-                if (!in_array($fileType, $this->getAllowedMimeTypes()) || !in_array(strtolower($fileExtension), $this->getAllowedFileExtensions()) || $_FILES['attachment']['size'] > (ATT_MAX * 1048576)) { // file size from admin
-                    wp_die(sprintf(__('<strong>ERROR:</strong> File you upload must be valid file type <strong>(%1$s)</strong>, and under %2$sMB!','comment-attachment'),$this->displayAllowedFileTypes(),ATT_MAX));
-                }
+                $f['tmp_name'] = $newName;
+                $_FILES[$k] = $f;
 
-                // error 4 is actually empty file mate
-            } elseif (ATT_REQ && $_FILES['attachment']['error'] == 4) {
-                wp_die(__('<strong>ERROR:</strong> Attachment is a required field!','comment-attachment'));
-            } elseif($_FILES['attachment']['error'] == 1) {
-                wp_die(__('<strong>ERROR:</strong> The uploaded file exceeds the upload_max_filesize directive in php.ini.','comment-attachment'));
-            } elseif($_FILES['attachment']['error'] == 2) {
-                wp_die(__('<strong>ERROR:</strong> The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form.','comment-attachment'));
-            } elseif($_FILES['attachment']['error'] == 3) {
-                wp_die(__('<strong>ERROR:</strong> The uploaded file was only partially uploaded. Please try again later.','comment-attachment'));
-            } elseif($_FILES['attachment']['error'] == 6) {
-                wp_die(__('<strong>ERROR:</strong> Missing a temporary folder.','comment-attachment'));
-            } elseif($_FILES['attachment']['error'] == 7) {
-                wp_die(__('<strong>ERROR:</strong> Failed to write file to disk.','comment-attachment'));
-            } elseif($_FILES['attachment']['error'] == 7) {
-                wp_die(__('<strong>ERROR:</strong> A PHP extension stopped the file upload.','comment-attachment'));
+                if($f['size'] > 0 && $f['error'] == 0){
+
+                    $fileInfo = pathinfo($f['name']);
+                    $fileExtension = strtolower($fileInfo['extension']);
+
+                    if(function_exists('finfo_file')){
+                        $fileType = finfo_file(finfo_open(FILEINFO_MIME_TYPE), $f['tmp_name']);
+                    } elseif(function_exists('mime_content_type')) {
+                        $fileType = mime_content_type($f['tmp_name']);
+                    } else {
+                        $fileType = $f['type'];
+                    }
+
+                    // Is: allowed mime type / file extension, and size? extension making lowercase, just to make sure
+                    if (!in_array($fileType, $this->getAllowedMimeTypes()) || !in_array(strtolower($fileExtension), $this->getAllowedFileExtensions()) || $f['size'] > (ATT_MAX * 1048576)) { // file size from admin
+                        wp_die(sprintf(__('<strong>ERROR:</strong> File you upload must be valid file type <strong>(%1$s)</strong>, and under %2$sMB!','comment-attachment'),$this->displayAllowedFileTypes(),ATT_MAX));
+                    }
+
+                    // error 4 is actually empty file mate
+                } elseif (ATT_REQ && $f['error'] == 4) {
+                    wp_die(__('<strong>ERROR:</strong> Attachment is a required field!','comment-attachment'));
+                } elseif($_FILES['attachment']['error'] == 1) {
+                    wp_die(__('<strong>ERROR:</strong> The uploaded file exceeds the upload_max_filesize directive in php.ini.','comment-attachment'));
+                } elseif($_FILES['attachment']['error'] == 2) {
+                    wp_die(__('<strong>ERROR:</strong> The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form.','comment-attachment'));
+                } elseif($_FILES['attachment']['error'] == 3) {
+                    wp_die(__('<strong>ERROR:</strong> The uploaded file was only partially uploaded. Please try again later.','comment-attachment'));
+                } elseif($_FILES['attachment']['error'] == 6) {
+                    wp_die(__('<strong>ERROR:</strong> Missing a temporary folder.','comment-attachment'));
+                } elseif($_FILES['attachment']['error'] == 7) {
+                    wp_die(__('<strong>ERROR:</strong> Failed to write file to disk.','comment-attachment'));
+                } elseif($_FILES['attachment']['error'] == 7) {
+                    wp_die(__('<strong>ERROR:</strong> A PHP extension stopped the file upload.','comment-attachment'));
+                }
             }
+
+            error_log('[WPCA] Pre-filter OK!');
+
             return $data;
         }
 
@@ -771,7 +893,14 @@ if (!class_exists('wpCommentAttachment')){
             require_once(ABSPATH . "wp-admin" . '/includes/image.php');
             require_once(ABSPATH . "wp-admin" . '/includes/file.php');
             require_once(ABSPATH . "wp-admin" . '/includes/media.php');
-            return media_handle_upload($fileHandler, $postId);
+
+
+            // Y> Add upload overrides so we can process the file properly
+            error_log("[WPCA] Adding attachment $fileHandler to post id $postId");
+            return media_handle_upload($fileHandler, $postId, [], [
+                'test_form' => false,
+                'action' => 'y_attachment_upload'
+            ]);
         }
 
 
@@ -784,12 +913,19 @@ if (!class_exists('wpCommentAttachment')){
 
         public function saveAttachment($commentId)
         {
-            if($_FILES['attachment']['size'] > 0){
-                $bindId = ATT_BIND ? $_POST['comment_post_ID'] : 0;
-                $attachId = $this->insertAttachment('attachment', $bindId);
-                add_comment_meta($commentId, 'attachmentId', $attachId);
-                unset($_FILES);
+            error_log('[WPCA] Save attachment', print_r($_FILES, true));
+
+            $attachments = [];
+            foreach ($_FILES as $k => $f)
+            {
+                if($f['size'] > 0){
+                    $bindId = ATT_BIND ? $_POST['comment_post_ID'] : 0;
+                    $attachments[] = $this->insertAttachment($k, $bindId);
+                }
             }
+
+            update_comment_meta($commentId, 'attachmentId', $attachments);
+            unset($_FILES);
         }
 
 
@@ -921,7 +1057,7 @@ if (!class_exists('wpCommentAttachment')){
         {
             if(wpCommentAttachment::hasAttachment($comment->comment_ID)){
                 $url = $_SERVER["SCRIPT_NAME"] . "?c=$comment->comment_ID&deleteAtt=1";
-                $actions['deleteAtt'] = "<a href='$url' title='".esc_attr__('Delete Attachment','comment-attachment')."'>".__('Delete Attachment','comment-attachment').'</a>';
+                $actions['deleteAtt'] = "<a href='$url' title='".esc_attr__('Delete Attachment(s)','comment-attachment')."'>".__('Delete Attachment(s)','comment-attachment').'</a>';
             }
             return $actions;
         }

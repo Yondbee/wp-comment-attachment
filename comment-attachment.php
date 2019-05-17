@@ -1,12 +1,12 @@
 <?php
 /*
-    Plugin Name: Comment Attachment
-    Plugin URI: http://latorante.name
-    Description: Wordpress out-of-the-box comment attachment functionality. Offer your visitors the ability to attach images, or documents to their comments that automatically attach to your Wordpress media gallery. Make the attachments visible, downloadable as you wish.
-    Author: latorante
-    Author URI: http://latorante.name
-    Author Email: martin@latorante.name
-    Version: 1.5.8.1
+    Plugin Name: Comment Attachment Enhanced
+    Plugin URI: https://github.com/Yondbee/wp-comment-attachment
+    Description: Wordpress *enhanced* out-of-the-box comment attachment functionality. Offer your visitors the ability to attach multilpe files to their comments that automatically attach to your Wordpress media gallery. Make the attachments visible, downloadable as you wish.
+    Author: Yondbee
+    Author URI: https://www.yondbee.com
+    Author Email: andrea@yondbee.com
+    Version: 1.5.9.0
     License: GPLv2
 	Text Domain: comment-attachment
 	Domain Path: /languages/
