@@ -98,8 +98,15 @@ if (!class_exists('wpCommentAttachment')){
                 wp_enqueue_script('polyfill-promise', 'https://polyfill.io/v3/polyfill.min.js?features=default%2CPromise');
                 
             });
-        }
 
+            // Redirect back to the referrer, not down to the comment itself
+            add_filter('comment_post_redirect', function  ($location, $comment) {
+                if (strpos($_SERVER["HTTP_REFERER"], '/profile') !== false)
+                    return home_url('/profile/?challenge=' . $comment->comment_post_ID);
+            }, 10, 2);
+
+        }
+        
         /**
          * Admin init
          */
