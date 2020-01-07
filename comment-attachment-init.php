@@ -68,7 +68,7 @@ if (!class_exists('wpCommentAttachment')){
 
 
 
-            // Check Requriemnts
+            // Check Requiremnts
             if(!$this->checkRequirements()){ return; }
             // Magic actions
 
@@ -103,7 +103,7 @@ if (!class_exists('wpCommentAttachment')){
             add_filter('comment_post_redirect', function  ($location, $comment) {
                 if (strpos($_SERVER["HTTP_REFERER"], '/profile') !== false) {
                     return home_url('/profile/?challenge=' . $comment->comment_post_ID);
-                } else if(get_post_type($comment->comment_post_ID) == 'post') {
+                } else if(get_post_type($comment->comment_post_ID) == 'post') { //check if comment is from post to redirect to post
                     return $_SERVER["HTTP_REFERER"];
                 }
             }, 10, 2);
@@ -806,6 +806,8 @@ if (!class_exists('wpCommentAttachment')){
 
                 But using filestack's upload structure.
             */
+
+            //check if comment comes from post and its not required the attachment.
             if(get_post_type($data['comment_post_ID']) == 'post' && ATT_REQ == false) {
                 return $data;
             }
