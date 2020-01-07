@@ -66,12 +66,12 @@ if (!class_exists('wpCommentAttachment')){
             // Language support
             load_plugin_textdomain('comment-attachment', false, dirname(plugin_basename(__FILE__)).'/languages/');
 
-            
+
 
             // Check Requriemnts
             if(!$this->checkRequirements()){ return; }
             // Magic actions
-            
+
             add_filter('preprocess_comment',        array($this, 'checkAttachment'), 10, 1);
             add_action('comment_form_top',          array($this, 'displayBeforeForm'));
             add_action('comment_form_before_fields',array($this, 'displayFormAttBefore'));
@@ -86,7 +86,7 @@ if (!class_exists('wpCommentAttachment')){
             // Y: Scripts for multiple file upload
             $settings = $this->settings;
             add_action('wp_enqueue_scripts', function () use ($settings) {
-                
+
                 wp_enqueue_script('comment-attachment', plugin_dir_url( __FILE__ ) . 'comment-attachment.js', ['jquery'], self::PLUGIN_VERSION, true);
 
                 // Y: Add custom settings
@@ -96,17 +96,20 @@ if (!class_exists('wpCommentAttachment')){
 
                 wp_enqueue_script('filestack', 'https://static.filestackapi.com/filestack-js/1.x.x/filestack.min.js');
                 wp_enqueue_script('polyfill-promise', 'https://polyfill.io/v3/polyfill.min.js?features=default%2CPromise');
-                
+
             });
 
             // Redirect back to the referrer, not down to the comment itself
             add_filter('comment_post_redirect', function  ($location, $comment) {
-                if (strpos($_SERVER["HTTP_REFERER"], '/profile') !== false)
+                if (strpos($_SERVER["HTTP_REFERER"], '/profile') !== false) {
                     return home_url('/profile/?challenge=' . $comment->comment_post_ID);
+                } else if(get_post_type($comment->comment_post_ID) == 'post') {
+                    return $_SERVER["HTTP_REFERER"];
+                }
             }, 10, 2);
 
         }
-        
+
         /**
          * Admin init
          */
@@ -176,7 +179,7 @@ if (!class_exists('wpCommentAttachment')){
                 'std'     => '',
                 'type'    => 'text',
                 'section' => $this->adminPrefix
-            );            
+            );
 
             $setts[$this->adminPrefix . 'FilestackAmazonS3BucketFolder'] = array(
                 'title'   => __('The subfolder of the Amazon S3 bucket where to store the files','comment-attachment'),
@@ -184,7 +187,7 @@ if (!class_exists('wpCommentAttachment')){
                 'std'     => '',
                 'type'    => 'text',
                 'section' => $this->adminPrefix
-            );                        
+            );
 
             $setts[$this->adminPrefix . 'MaxSize'] = array(
                 'title'   => __('Maxium file size <small>(in megabytes)</small>','comment-attachment'),
@@ -803,6 +806,9 @@ if (!class_exists('wpCommentAttachment')){
 
                 But using filestack's upload structure.
             */
+            if(get_post_type($data['comment_post_ID']) == 'post' && ATT_REQ == false) {
+                return $data;
+            }
             if (empty($_REQUEST['attachment-data']))
                 wp_die(__('<strong>ERROR:</strong> Unable to find attachment-data field!','comment-attachment'));
 
@@ -897,6 +903,9 @@ if (!class_exists('wpCommentAttachment')){
 
         public function insertAttachment($fileHandler, $postId)
         {
+            if(get_post_type($postId) == 'post') {
+                return $data;
+            }
             require_once(ABSPATH . "wp-admin" . '/includes/image.php');
             require_once(ABSPATH . "wp-admin" . '/includes/file.php');
             require_once(ABSPATH . "wp-admin" . '/includes/media.php');
